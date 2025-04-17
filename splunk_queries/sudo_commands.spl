@@ -1,0 +1,5 @@
+index="linux_logs" sourcetype="syslog" host="rocky-web01" "sudo"
+| rex field=_raw "sudo\\[\\d+\\]: (?<executing_user>[^ ]+) : TTY=[^;]+ ; PWD=(?<pwd>[^;]+) ; USER=(?<user>[^;]+) ; COMMAND=(?<command>.+)"
+| where isnotnull(command)
+| table _time executing_user user pwd command
+| sort -_time

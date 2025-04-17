@@ -1,0 +1,5 @@
+index="linux_logs" sourcetype="syslog" ("curl" OR "scp")
+| rex "COMMAND=(?<command>.+)"
+| search command="*POST*" OR command="*scp*" OR command="*/etc/shadow*"
+| table _time, host, user, command
+| sort -_time

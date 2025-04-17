@@ -1,0 +1,8 @@
+index="linux_logs" sourcetype="syslog" "sshd" ("USER_START" OR "USER_AUTH")
+| rex "acct=\"(?<user>[^\"]+)"
+| rex "addr=(?<ip>\d+\.\d+\.\d+\.\d+)"
+| rex "exe=\"(?<exe>[^\"]+)"
+| search res=success exe="/usr/sbin/sshd"
+| dedup _time, user, ip
+| table _time, host, user, ip
+| sort -_time

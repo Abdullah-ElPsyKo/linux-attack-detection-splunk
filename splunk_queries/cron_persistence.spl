@@ -1,0 +1,7 @@
+index="linux_logs" sourcetype="syslog" host="rocky-web01"
+"COMMAND=" "/etc/cron.d"
+| rex "COMMAND=(?<command>.+)"
+| rex "sudo\\[\d+\\]: (?<user>\w+)"
+| where isnotnull(command) AND isnotnull(user)
+| table _time, host, user, command
+| sort -_time

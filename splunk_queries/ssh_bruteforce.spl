@@ -1,0 +1,7 @@
+index="linux_logs" sourcetype="syslog" "authentication failure"
+| stats count as "SSH Failures"
+
+index="linux_logs" sourcetype="syslog" "sshd" "Failed password"
+| rex "Failed password for (invalid user )?(?<username>\w+) from (?<attacker_ip>\d+\.\d+\.\d+\.\d+)"
+| stats count by attacker_ip
+| sort -count

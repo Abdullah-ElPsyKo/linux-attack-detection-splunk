@@ -1,0 +1,6 @@
+index="linux_logs" sourcetype="syslog" ("/tmp/" OR "/dev/shm/" OR "/var/tmp/")
+| rex "a1=\"(?<executed>[^\"]+)"
+| where like(executed, "/tmp/%") OR like(executed, "/dev/shm/%") OR like(executed, "/var/tmp/%")
+| table _time, host, executed
+| dedup _time, host, executed
+| sort -_time

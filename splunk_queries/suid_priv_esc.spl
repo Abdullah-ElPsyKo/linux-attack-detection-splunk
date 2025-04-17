@@ -1,0 +1,8 @@
+index="linux_logs" sourcetype="syslog" ("type=EXECVE" OR "type=SYSCALL") ( "chmod" OR "u+s" )
+| rex field=_raw "msg=audit\\((?<audit_id>[^)]+)\\):"
+| eventstats values(_raw) as all_logs by audit_id
+| eval joined = mvjoin(all_logs, " ")
+| rex field=joined "(?<uid_field>(A|E|F|S)?UID)=\"?(?<user>[^\\s\"]+)\"?"
+| rex field=joined "a2=\\\"(?<target_file>[^\"]+)"
+| stats latest(_time) as _time values(user) as user values(target_file) as target_file values(host) as host by audit_id
+| table _time host user target_file
