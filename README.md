@@ -1,25 +1,36 @@
-
 # Linux Threat Detection Engineering Lab (Splunk SIEM & Auditd)
 
-## Engineering & Lab Overview
-This project demonstrates an end-to-end telemetry engineering and threat detection framework designed to capture low-level Linux kernel events and parse them into actionable security intelligence. By leveraging the Linux Audit Subsystem (`auditd`), telemetry is generated natively on endpoints and shipped via network sockets to a centralized SIEM platform for parsing, enrichment, and analysis.
+## Overview
 
-The primary objective is to build high-fidelity detection pipelines covering common post-exploitation tactics—such as lateral movement, privilege escalation, persistence, and data exfiltration—and map them directly to the **MITRE ATT&CK** matrix.
+This project demonstrates a Linux detection engineering lab built around **auditd**, **rsyslog**, and **Splunk Enterprise**.
 
----
-
-## Architecture & Telemetry Pipeline
-
-* **SIEM Core Platform:** Splunk Enterprise deployed on an optimized Ubuntu Server architecture.
-* **Target Monitored Endpoint:** Rocky Linux 9 (`rocky-web01`) emitting raw kernel-space event structures.
-* **Transport Layer:** Configured `rsyslog` daemon streaming formatted audit records over secure network sockets directly to the Splunk indexing engine.
-* **Attacker Infrastructure:** Kali Linux platform simulating targeted adversarial activity (e.g., automated credential stuffing and exploit execution).
+A Rocky Linux endpoint generates audit events, forwards them to a centralized Splunk server, and analyzes them using custom SPL queries. The lab focuses on detecting common attack techniques such as privilege escalation, persistence, brute-force attacks, command execution, and data exfiltration, with detections mapped to the **MITRE ATT&CK** framework.
 
 ---
 
-## Endpoint Telemetry Base Engine (`/etc/audit/rules.d/audit.rules`)
+## Architecture
 
-To achieve complete visibility into system state modifications without the overhead of heavy third-party kernel modules, a rigid audit ruleset was implemented to hook critical system calls (such as `execve`, `setuid`, and network socket allocations):
+| Component | Purpose |
+|-----------|---------|
+| **Splunk Enterprise** | Collects, indexes, and visualizes endpoint telemetry |
+| **Rocky Linux 9 (`rocky-web01`)** | Generates audit events using `auditd` |
+| **rsyslog** | Forwards audit logs to Splunk |
+| **Kali Linux** | Simulates attacker activity for testing detections |
+
+---
+
+## Audit Rules (`/etc/audit/rules.d/audit.rules`)
+
+The detection pipeline is built on Linux Audit (`auditd`). Custom audit rules monitor critical system activity including:
+
+- Process execution (`execve`)
+- Privilege escalation (`setuid`, `setgid`)
+- Persistence mechanisms (Cron, Systemd)
+- Network activity
+- Process creation
+- Log tampering
+- Common data exfiltration tools (`curl`, `scp`, `wget`, `ftp`)
+- SSH authentication activity
 
 ```bash
 -D
@@ -77,19 +88,23 @@ To achieve complete visibility into system state modifications without the overh
 
 ---
 
-## SIEM Dashboard Overview
+## Splunk Dashboard
 
-A custom analytical dashboard was built in Splunk Enterprise to visualize real-time attacks, aggregating indicators for brute-force tracking, unvalidated credential elevation, process spikes, and data egress attempts.
+A custom Splunk dashboard provides a real-time overview of endpoint activity, including authentication attempts, process execution, privilege escalation events, and potential data exfiltration.
 
 ![Splunk Dashboard](/images/Linux%20Attack%20Detection_2025-04-17%20at%2005.42.11%2B0200_Splunk.png)
 
 ---
 
-## Tactical Detection Engineering (Splunk SPL)
+# Detection Rules
 
-### 1. Privileged Execution Tracking: Sudo Commands
+Each detection includes the SPL query, supporting dashboard, and the attack technique it is designed to identify.
 
-Monitors administrative behavior by extracting active executing context fields out of structural syslog buffers.
+---
+
+## 1. Privileged Command Execution (sudo)
+
+Extracts executed commands from sudo logs to monitor administrative activity.
 
 ![Sudo Commands](/images/sudo_cmds.png)
 
@@ -102,14 +117,17 @@ index="linux_logs" sourcetype="syslog" host="rocky-web01" "sudo"
 
 ```
 
-### 2. Credential Access: SSH Brute Force Identification
+---
 
-Tracks failed remote authentication metrics and groups them by source IP addresses to flag automated brute-force scripts.
+## 2. SSH Brute Force Detection
 
-![alt text](/images/SSH_failures_single_dig.png)
-The image below shows more attempts due to the continues attempts, the screenshot was taken a bit later.
+Counts failed SSH authentication attempts by source IP to identify brute-force attacks.
+
+![SSH Attempts](/images/SSH_failures_single_dig.png)
+
+The image below was captured later during the attack, showing the increased number of failed login attempts.
+
 ![Failed SSH](/images/SSH_failed_attempts.png)
-
 
 ```spl
 index="linux_logs" sourcetype="syslog" "sshd" "Failed password"
@@ -119,9 +137,11 @@ index="linux_logs" sourcetype="syslog" "sshd" "Failed password"
 
 ```
 
-### 3. Remote Access Verification: Successful SSH Session Correlations
+---
 
-Tracks successful authentication events to establish a baseline for authorized remote connections and detect anomalous internal session pivots (Lateral Movement).
+## 3. Successful SSH Sessions
+
+Displays successful SSH logins to establish a baseline of legitimate remote access and help identify unusual authentication patterns.
 
 ![Successful Logins](/images/successful_SSH_logins.png)
 
@@ -137,9 +157,11 @@ index="linux_logs" sourcetype="syslog" "sshd" ("USER_START" OR "USER_AUTH")
 
 ```
 
-### 4. Privilege Escalation: SUID Exploitation & Abuse Patterns
+---
 
-Correlates transaction records across split execution events (`EXECVE` / `SYSCALL`) to detect binary manipulation or unvalidated SUID state transformations.
+## 4. SUID Privilege Escalation
+
+Correlates multi-line audit events to detect SUID modifications and privilege escalation attempts.
 
 ![SUID](/images/suid_priv_esc.png)
 
@@ -155,11 +177,13 @@ index="linux_logs" sourcetype="syslog" ("type=EXECVE" OR "type=SYSCALL") ( "chmo
 
 ```
 
-### 5. Persistence: Rogue Cron Job Injection
+---
 
-Flags rogue system automation writes or scheduled payload modifications targeting critical system directories.
+## 5. Cron Persistence
 
-![cron](/images/cron_persistence.png)
+Detects modifications to cron jobs that could be used for persistence.
+
+![Cron Persistence](/images/cron_persistence.png)
 
 ```spl
 index="linux_logs" sourcetype="syslog" host="rocky-web01" "COMMAND=" "/etc/cron.d"
@@ -171,10 +195,13 @@ index="linux_logs" sourcetype="syslog" host="rocky-web01" "COMMAND=" "/etc/cron.
 
 ```
 
-### 6. Defense Evasion: Binary Execution from Volatile Memory
+---
 
-Intercepts and alerts when system utilities or binary compilation hooks spawn direct execution trees inside transient, world-writable mount boundaries (`/tmp`, `/var/tmp`, `/dev/shm`), a primary hallmark of staged payloads and volatile memory execution.
-![temp_exec](/images/sus_temp_files_exec.png)
+## 6. Execution from Temporary Directories
+
+Detects binaries executed from `/tmp`, `/var/tmp`, and `/dev/shm`, locations commonly abused for staging payloads or fileless execution.
+
+![Temporary Execution](/images/sus_temp_files_exec.png)
 
 ```spl
 index="linux_logs" sourcetype="syslog" ("/tmp/" OR "/dev/shm/" OR "/var/tmp/")
@@ -186,11 +213,15 @@ index="linux_logs" sourcetype="syslog" ("/tmp/" OR "/dev/shm/" OR "/var/tmp/")
 
 ```
 
-### 7. Exfiltration: Data Egress via Network Tooling
+---
 
-Monitors living-off-the-land network clients (e.g., curl, scp) processing high-severity arguments targeted at critical system configuration files. The capture below catches an active exfiltration of the system credential store (/etc/shadow) via an outbound HTTP POST request.
+## 7. Data Exfiltration
 
-![exfilt_attempts](/images/exfiltration.png)
+Monitors common transfer utilities such as `curl` and `scp` for activity that may indicate data exfiltration.
+
+The example below captures an attempt to transfer `/etc/shadow`.
+
+![Data Exfiltration](/images/exfiltration.png)
 
 ```spl
 index="linux_logs" sourcetype="syslog" ("curl" OR "scp")
@@ -203,25 +234,30 @@ index="linux_logs" sourcetype="syslog" ("curl" OR "scp")
 
 ---
 
-## MITRE ATT&CK Mapping Matrix
+# MITRE ATT&CK Mapping
 
-| Tactics | Technique ID | Enterprise Vector Description | Detection Metric Layer |
-| --- | --- | --- | --- |
-| **Initial Access / Credential Access** | **T1110.001** | Brute Force: Password Guessing | Real-time `sshd` log auditing and threshold alerts. |
-| **Execution** | **T1059** | Command and Scripting Interpreter | Interception of `execve` boundaries via system rules. |
-| **Persistence** | **T1547.001** | Boot or Logon Autostart: Cron | File integrity alerting covering `/etc/cron.d/*` boundaries. |
-| **Persistence** | **T1546.004** | Event Triggered Execution: Systemd | Integrity alerting covering `/etc/systemd/system/` writes. |
-| **Privilege Escalation** | **T1548.001** | Abuse Elevation Control Mechanism: SUID | Multi-line correlation tracking on active `chmod` system calls. |
-| **Exfiltration** | **T1041** | Exfiltration Over C2 Channel | Parameter filtering on standard transfer binaries (`curl`, `scp`). |
+| Tactic | Technique | Detection |
+|---------|-----------|-----------|
+| Credential Access | T1110.001 | SSH brute-force detection |
+| Execution | T1059 | Process execution (`execve`) |
+| Persistence | T1547.001 | Cron monitoring |
+| Persistence | T1546.004 | Systemd monitoring |
+| Privilege Escalation | T1548.001 | SUID monitoring |
+| Exfiltration | T1041 | Network transfer utilities |
 
 ---
 
-## Analytical Conclusions & Operational Takeaways
+# What I Learned
 
-By centralizing OS-level logs and enforcing comprehensive endpoint auditing rules, complete visibility into adversarial behaviors was achieved without the need for invasive host agents.
+Building this lab improved my understanding of:
 
-This environment proves that a resilient detection posture is built through structured log aggregation, concise system metrics parsing, and mapping telemetry streams directly against verified, real-world attack vectors.
-
-```
-
-```
+- Linux Audit (`auditd`)
+- Endpoint telemetry collection
+- Log forwarding with `rsyslog`
+- Splunk Enterprise administration
+- SPL query development
+- Detection engineering
+- MITRE ATT&CK mapping
+- Linux persistence techniques
+- Privilege escalation detection
+- Security monitoring pipelines
